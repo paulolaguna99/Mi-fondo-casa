@@ -1,7 +1,7 @@
 import streamlit as st
-import sqlite3
-from datetime import date
 import pandas as pd
+from datetime import date
+from supabase import create_client
 
 # =========================
 # CONFIGURACIÓN
@@ -14,52 +14,61 @@ MONEDA = "US$"
 CATEGORIAS = ["Casa", "Ómnibus", "Ocio"]
 
 # =========================
-# BASE DE DATOS
+# CONEXIÓN CON SUPABASE
 # =========================
 
-conn = sqlite3.connect("finanzas_personales.db", check_same_thread=False)
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
-conn.execute("""
-CREATE TABLE IF NOT EXISTS movimientos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL,
-    categoria TEXT NOT NULL,
-    monto REAL NOT NULL,
-    descripcion TEXT
+supabase = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY
 )
-""")
-
-conn.commit()
-
 
 # =========================
 # FUNCIONES
 # =========================
 
 def obtener_movimientos():
-    return pd.read_sql_query(
-        "SELECT * FROM movimientos ORDER BY fecha DESC, id DESC",
-        conn
+    respuesta = (
+        supabase
+        .table("movimientos")
+        .select("*")
+        .order("fecha", desc=True)
+        .order("id", desc=True)
+        .execute()
     )
+
+    datos = respuesta.data
+
+    if not datos:
+        return pd.DataFrame(
+            columns=[
+                "id",
+                "fecha",
+                "categoria",
+                "monto",
+                "descripcion"
+            ]
+        )
+
+    return pd.DataFrame(datos)
 
 
 def agregar_movimiento(fecha, categoria, monto, descripcion):
-    conn.execute(
-        """
-        INSERT INTO movimientos (fecha, categoria, monto, descripcion)
-        VALUES (?, ?, ?, ?)
-        """,
-        (str(fecha), categoria, monto, descripcion)
-    )
-    conn.commit()
+    supabase.table("movimientos").insert({
+        "fecha": str(fecha),
+        "categoria": categoria,
+        "monto": float(monto),
+        "descripcion": descripcion
+    }).execute()
 
 
 def eliminar_movimiento(id_movimiento):
-    conn.execute(
-        "DELETE FROM movimientos WHERE id = ?",
-        (id_movimiento,)
-    )
-    conn.commit()
+    supabase.table("movimientos").delete().eq(
+        "id",
+        int(id_movimiento)
+    ).execute()
 
 
 # =========================
@@ -100,6 +109,7 @@ st.markdown("""
 # =========================
 
 st.title("🏠 Mi Fondo Casa")
+
 st.markdown(
     "### Tu objetivo: llegar a **US$40.000**"
 )
@@ -289,7 +299,7 @@ if not df.empty:
 
     if not df_casa.empty:
 
-        df_casa = df_casa.sort_values("fecha")
+        df_casa = df_casa.sort_values(["fecha", "id"])
 
         df_casa["acumulado"] = (
             df_casa["monto"].cumsum() + AHORRO_INICIAL
